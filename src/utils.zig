@@ -8,6 +8,21 @@ pub const DataUrl = struct {
 pub fn joinUrl(allocator: std.mem.Allocator, base_url: []const u8, path: []const u8) ![]u8 {
     const normalized_base = std.mem.trimRight(u8, base_url, "/");
     const normalized_path = std.mem.trimLeft(u8, path, "/");
+
+    // If the path starts with v1 and base_url already contains a version like /v4,
+    // we should prioritize the base_url's versioning if it looks like an API root.
+    // However, the simplest fix is to check if the base_url ends with a version-like path.
+    const v_index = std.mem.lastIndexOf(u8, normalized_base, "/v") orelse return std.fmt.allocPrint(allocator, "{s}/{s}", .{ normalized_base, normalized_path });
+    
+    // If we find /vN at the end or followed by a number
+    if (v_index + 2 < normalized_base.len and std.ascii.isDigit(normalized_base[v_index + 2])) {
+        // Base has /v4. If path has /v1/chat/completions, we stripped /v1 to get /chat/completions.
+        // Wait, normalized_path still has /v1. Let's check.
+        if (std.mem.startsWith(u8, normalized_path, "v1/")) {
+             return std.fmt.allocPrint(allocator, "{s}/{s}", .{ normalized_base, normalized_path[3..] });
+        }
+    }
+
     return std.fmt.allocPrint(allocator, "{s}/{s}", .{ normalized_base, normalized_path });
 }
 

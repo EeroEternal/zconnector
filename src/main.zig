@@ -3,8 +3,8 @@ const zconnector = @import("zconnector");
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
-    
-    const api_key = init.environ_map.get("OPENAI_API_KEY") orelse "sk-placeholder"; 
+
+    const api_key = init.environ_map.get("OPENAI_API_KEY") orelse "sk-placeholder";
     const base_url = init.environ_map.get("OPENAI_BASE_URL") orelse "https://api.openai.com";
     const model_name = init.environ_map.get("OPENAI_MODEL_NAME") orelse "gpt-4o-mini";
 

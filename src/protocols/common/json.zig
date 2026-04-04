@@ -68,12 +68,41 @@ fn writeOpenAiMessage(allocator: std.mem.Allocator, writer: *std.Io.Writer, mess
     try writer.writeByte('{');
     try writer.writeAll("\"role\":");
     try writeRole(writer, message.role);
-    try writer.writeAll(",\"content\":");
-    try writeOpenAiChatContent(allocator, writer, message.content);
+
+    if (message.content != .text or (message.content == .text and message.content.text.len > 0) or (message.role != .assistant)) {
+        try writer.writeAll(",\"content\":");
+        try writeOpenAiChatContent(allocator, writer, message.content);
+    } else if (message.role == .assistant and message.tool_calls != null) {
+        try writer.writeAll(",\"content\":null");
+    }
+
     if (message.name) |name| {
         try writer.writeAll(",\"name\":");
         try writeJson(writer, name);
     }
+
+    if (message.tool_calls) |tool_calls| {
+        try writer.writeAll(",\"tool_calls\":");
+        try writer.writeByte('[');
+        for (tool_calls.items, 0..) |tc, i| {
+            if (i > 0) try writer.writeByte(',');
+            try writer.writeByte('{');
+            try writer.writeAll("\"id\":");
+            try writeJson(writer, tc.id);
+            try writer.writeAll(",\"type\":\"function\",\"function\":{\"name\":");
+            try writeJson(writer, tc.function.name);
+            try writer.writeAll(",\"arguments\":");
+            try writeJson(writer, tc.function.arguments);
+            try writer.writeAll("}}");
+        }
+        try writer.writeByte(']');
+    }
+
+    if (message.tool_call_id) |tcid| {
+        try writer.writeAll(",\"tool_call_id\":");
+        try writeJson(writer, tcid);
+    }
+
     try writer.writeByte('}');
 }
 
@@ -110,6 +139,40 @@ pub fn stringifyOpenAiRequest(
                 try writeOpenAiMessage(allocator, writer, message);
             }
             try writer.writeByte(']');
+
+            if (request.tools) |tools| {
+                try writer.writeAll(",\"tools\":");
+                try writer.writeByte('[');
+                for (tools.items, 0..) |tool, i| {
+                    if (i > 0) try writer.writeByte(',');
+                    try writer.writeByte('{');
+                    try writer.writeAll("\"type\":\"function\",\"function\":{");
+                    try writer.writeAll("\"name\":");
+                    try writeJson(writer, tool.function.name);
+                    try writer.writeAll(",\"description\":");
+                    try writeJson(writer, tool.function.description);
+                    try writer.writeAll(",\"parameters\":");
+                    try writeJson(writer, tool.function.parameters);
+                    if (tool.function.strict) {
+                        try writer.writeAll(",\"strict\":true");
+                    }
+                    try writer.writeAll("}}");
+                }
+                try writer.writeByte(']');
+            }
+
+            if (request.tool_choice) |choice| {
+                try writer.writeAll(",\"tool_choice\":");
+                switch (choice) {
+                    .string => |s| try writeJson(writer, s),
+                    .tool => |t| {
+                        try writer.writeByte('{');
+                        try writer.writeAll("\"type\":\"function\",\"function\":{\"name\":");
+                        try writeJson(writer, t.function.name);
+                        try writer.writeAll("}}");
+                    },
+                }
+            }
         },
         .responses => {
             try writer.writeAll(",\"input\":[");
@@ -143,6 +206,33 @@ pub fn stringifyOpenAiRequest(
                 try writer.writeByte('}');
             },
         }
+    }
+
+    if (request.response_format) |format| {
+        try writer.writeAll(",\"response_format\":");
+        switch (format) {
+            .text => try writer.writeAll("{\"type\":\"text\"}"),
+            .json_object => try writer.writeAll("{\"type\":\"json_object\"}"),
+            .json_schema => |schema| {
+                try writer.writeAll("{\"type\":\"json_schema\",\"json_schema\":{");
+                try writer.writeAll("\"name\":");
+                try writeJson(writer, schema.name);
+                // description is not in our struct currently, skip or add if needed
+                try writer.writeAll(",\"schema\":");
+                try writeJson(writer, schema.schema);
+                if (schema.strict) {
+                    try writer.writeAll(",\"strict\":true");
+                }
+                try writer.writeAll("}}");
+            },
+        }
+    }
+
+    if (request.presence_penalty != 0) {
+        try writer.print(",\"presence_penalty\":{d}", .{request.presence_penalty});
+    }
+    if (request.frequency_penalty != 0) {
+        try writer.print(",\"frequency_penalty\":{d}", .{request.frequency_penalty});
     }
 
     try writer.writeByte('}');
@@ -389,6 +479,38 @@ pub fn parseOpenAiResponse(allocator: std.mem.Allocator, body: []const u8) !type
     const content = try collectOpenAiContent(allocator, parsed.value);
     errdefer allocator.free(content);
 
+    var tool_calls: ?std.ArrayList(types.ToolCall) = null;
+    if (objectField(parsed.value, "choices")) |choices| {
+        if (firstArrayItem(choices)) |choice| {
+            if (objectField(choice, "message")) |message| {
+                if (objectField(message, "tool_calls")) |tc_array| {
+                    switch (tc_array) {
+                        .array => |array| {
+                            tool_calls = .empty;
+                            for (array.items) |tc_item| {
+                                const id = if (objectField(tc_item, "id")) |v| stringValue(v) else null;
+                                const func_obj = objectField(tc_item, "function");
+                                const name = if (func_obj) |v| (if (objectField(v, "name")) |n| stringValue(n) else null) else null;
+                                const args = if (func_obj) |v| (if (objectField(v, "arguments")) |a| stringValue(a) else null) else null;
+
+                                if (id != null and name != null and args != null) {
+                                    try tool_calls.?.append(allocator, .{
+                                        .id = try allocator.dupe(u8, id.?),
+                                        .function = .{
+                                            .name = try allocator.dupe(u8, name.?),
+                                            .arguments = try allocator.dupe(u8, args.?),
+                                        },
+                                    });
+                                }
+                            }
+                        },
+                        else => {},
+                    }
+                }
+            }
+        }
+    }
+
     var finish_reason: []const u8 = "stop";
     if (objectField(parsed.value, "status")) |status_value| {
         if (stringValue(status_value)) |status| finish_reason = status;
@@ -419,6 +541,7 @@ pub fn parseOpenAiResponse(allocator: std.mem.Allocator, body: []const u8) !type
         .content = content,
         .model = try allocator.dupe(u8, model),
         .usage = usage,
+        .tool_calls = tool_calls,
         .finish_reason = try allocator.dupe(u8, finish_reason),
         .raw_json = try allocator.dupe(u8, body),
     };

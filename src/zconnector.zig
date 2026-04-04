@@ -13,6 +13,10 @@ pub const StreamChunk = types.StreamChunk;
 pub const Usage = types.Usage;
 pub const LlmError = types.LlmError;
 pub const FilePayload = types.FilePayload;
+pub const Tool = types.Tool;
+pub const ToolCall = types.ToolCall;
+pub const ToolFunction = types.ToolFunction;
+pub const ResponseFormat = types.ResponseFormat;
 
 pub const Provider = enum {
     openai,

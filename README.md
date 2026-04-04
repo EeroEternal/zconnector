@@ -4,14 +4,15 @@ Zig LLM Connector is a lightweight, standard-library-first Zig SDK for OpenAI, A
 
 ## Status
 
-This is v0.1.0 and currently targets Zig 0.15+. The code is structured for extension and includes:
+This is v0.2.0 and currently targets Zig 0.15+. The code is structured for extension and includes:
 
 - Unified chat API for OpenAI and Anthropic
+- **Full OpenAI Tooling**: Function Calling (Tools), Tool Choice, and Structured Outputs
 - OpenAI Responses API with automatic fallback to Chat Completions on 404 and 405
 - SSE streaming helpers for both providers
 - Multimodal message support for text, image URLs, and file payloads
 - Builder-based client configuration with custom headers and timeout fields
-- Example programs for chat, streaming, reasoning, file upload, and multi-provider usage
+- Example programs for chat, streaming, reasoning, file upload, tools, and multi-provider usage
 
 ## Install
 

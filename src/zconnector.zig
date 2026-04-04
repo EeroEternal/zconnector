@@ -24,11 +24,6 @@ pub const Provider = enum {
 };
 
 pub const LlmClient = struct {
-    allocator: std.mem.Allocator,
-    http_client: std.http.Client,
-    config: LlmConfig,
-    provider: Provider,
-
     pub const LlmConfig = struct {
         api_key: []const u8,
         base_url: []const u8,
@@ -36,26 +31,34 @@ pub const LlmClient = struct {
         extra_headers: std.StringHashMap([]const u8),
     };
 
+    allocator: std.mem.Allocator,
+    http_client: std.http.Client,
+    config: LlmConfig,
+    provider: Provider,
+    io: ?std.Io = null, // 注入 I/O 后端实现
+
     pub fn builder(allocator: std.mem.Allocator) Builder {
         return Builder.init(allocator);
     }
 
-    pub fn openai(allocator: std.mem.Allocator, api_key: []const u8, base_url: []const u8) !LlmClient {
+    pub fn openai(allocator: std.mem.Allocator, api_key: []const u8, base_url: []const u8, io: std.Io) !LlmClient {
         var build_state = Builder.init(allocator);
-        _ = build_state.withProvider(.openai).withApiKey(api_key).withBaseUrl(base_url);
+        _ = build_state.withProvider(.openai).withApiKey(api_key).withBaseUrl(base_url).withIo(io);
         return build_state.build();
     }
 
-    pub fn anthropic(allocator: std.mem.Allocator, api_key: []const u8, base_url: []const u8) !LlmClient {
+    pub fn anthropic(allocator: std.mem.Allocator, api_key: []const u8, base_url: []const u8, io: std.Io) !LlmClient {
         var build_state = Builder.init(allocator);
-        _ = build_state.withProvider(.anthropic).withApiKey(api_key).withBaseUrl(base_url);
+        _ = build_state.withProvider(.anthropic).withApiKey(api_key).withBaseUrl(base_url).withIo(io);
         return build_state.build();
     }
 
-    pub fn chat(self: *LlmClient, request: *const ChatRequest) !Response {
+    pub fn chat(self: *LlmClient, request: *const ChatRequest, options: anytype) !Response {
+        var io_val = if (@hasField(@TypeOf(options), "io")) options.io else self.io.?;
+        const io = &io_val;
         return switch (self.provider) {
             .openai => if (request.reasoning_effort != null)
-                try self.responses(request)
+                try self.responses(request, options)
             else
                 try openai_adapter.chat(
                     self.allocator,
@@ -65,6 +68,7 @@ pub const LlmClient = struct {
                     self.config.timeout_ms,
                     &self.config.extra_headers,
                     request,
+                    io,
                 ),
             .anthropic => try anthropic_adapter.chat(
                 self.allocator,
@@ -74,11 +78,14 @@ pub const LlmClient = struct {
                 self.config.timeout_ms,
                 &self.config.extra_headers,
                 request,
+                io,
             ),
         };
     }
 
-    pub fn chatStream(self: *LlmClient, request: *const ChatRequest, writer: anytype) !void {
+    pub fn chatStream(self: *LlmClient, request: *const ChatRequest, writer: anytype, options: anytype) !void {
+        var io_val = if (@hasField(@TypeOf(options), "io")) options.io else self.io.?;
+        const io = &io_val;
         return switch (self.provider) {
             .openai => try openai_adapter.chatStream(
                 self.allocator,
@@ -89,6 +96,7 @@ pub const LlmClient = struct {
                 &self.config.extra_headers,
                 request,
                 writer,
+                io,
             ),
             .anthropic => try anthropic_adapter.chatStream(
                 self.allocator,
@@ -99,11 +107,14 @@ pub const LlmClient = struct {
                 &self.config.extra_headers,
                 request,
                 writer,
+                io,
             ),
         };
     }
 
-    pub fn responses(self: *LlmClient, request: *const ChatRequest) !Response {
+    pub fn responses(self: *LlmClient, request: *const ChatRequest, options: anytype) !Response {
+        var io_val = if (@hasField(@TypeOf(options), "io")) options.io else self.io.?;
+        const io = &io_val;
         return switch (self.provider) {
             .openai => try openai_adapter.responses(
                 self.allocator,
@@ -113,16 +124,9 @@ pub const LlmClient = struct {
                 self.config.timeout_ms,
                 &self.config.extra_headers,
                 request,
+                io,
             ),
-            .anthropic => try anthropic_adapter.chat(
-                self.allocator,
-                &self.http_client,
-                self.config.api_key,
-                self.config.base_url,
-                self.config.timeout_ms,
-                &self.config.extra_headers,
-                request,
-            ),
+            else => LlmError.ProviderSpecific,
         };
     }
 
@@ -141,6 +145,7 @@ pub const Builder = struct {
     base_url: ?[]const u8 = null,
     timeout_ms: u32 = 120_000,
     extra_headers: std.StringHashMap([]const u8),
+    io: ?std.Io = null,
 
     pub fn init(allocator: std.mem.Allocator) Builder {
         return .{
@@ -151,6 +156,11 @@ pub const Builder = struct {
 
     pub fn deinit(self: *Builder) void {
         self.extra_headers.deinit();
+    }
+
+    pub fn withIo(self: *Builder, io: std.Io) *Builder {
+        self.io = io;
+        return self;
     }
 
     pub fn withProvider(self: *Builder, provider: Provider) *Builder {
@@ -181,6 +191,7 @@ pub const Builder = struct {
     pub fn build(self: *Builder) !LlmClient {
         const api_key = self.api_key orelse return error.InvalidConfiguration;
         const base_url = self.base_url orelse return error.InvalidConfiguration;
+        const io = self.io orelse return error.InvalidConfiguration;
 
         var headers = std.StringHashMap([]const u8).init(self.allocator);
         var iterator = self.extra_headers.iterator();
@@ -196,8 +207,9 @@ pub const Builder = struct {
 
         return .{
             .allocator = self.allocator,
-            .http_client = .{ .allocator = self.allocator },
+            .http_client = .{ .allocator = self.allocator, .io = io },
             .provider = self.provider,
+            .io = io,
             .config = .{
                 .api_key = try self.allocator.dupe(u8, api_key),
                 .base_url = try self.allocator.dupe(u8, base_url),

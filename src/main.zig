@@ -1,23 +1,14 @@
 const std = @import("std");
 const zconnector = @import("zconnector");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    
+    const api_key = init.environ_map.get("OPENAI_API_KEY") orelse "sk-placeholder"; 
+    const base_url = init.environ_map.get("OPENAI_BASE_URL") orelse "https://api.openai.com";
+    const model_name = init.environ_map.get("OPENAI_MODEL_NAME") orelse "gpt-4o-mini";
 
-    const allocator = gpa.allocator();
-    var stdout = std.fs.File.stdout().deprecatedWriter();
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
-    const api_key = std.posix.getenv("OPENAI_API_KEY") orelse {
-        try stdout.writeAll("Set OPENAI_API_KEY and optionally OPENAI_BASE_URL to run the demo.\n");
-        return;
-    };
-    const base_url = std.posix.getenv("OPENAI_BASE_URL") orelse "https://api.openai.com";
-    const model_name = if (args.len > 1) args[1] else "gpt-4.1-mini";
-
-    var client = try zconnector.LlmClient.openai(allocator, api_key, base_url);
+    var client = try zconnector.LlmClient.openai(allocator, api_key, base_url, init.io);
     defer client.deinit();
 
     var request = try zconnector.ChatRequest.new(allocator, model_name);
@@ -26,8 +17,13 @@ pub fn main() !void {
     _ = try request.addMessage(.system, "You are a concise assistant.");
     _ = try request.addMessage(.user, "Say hello from zconnector.");
 
-    var response = try client.chat(&request);
+    var response = try client.chat(&request, .{ .io = init.io });
     defer response.deinit();
 
-    try stdout.print("model: {s}\n\n{s}\n", .{ response.model, response.content });
+    const stdout = std.Io.File.stdout();
+    var buffer: [4096]u8 = undefined;
+    var writer = stdout.writer(init.io, &buffer);
+
+    try writer.interface.print("model: {s}\n\n{s}\n", .{ response.model, response.content });
+    try writer.flush();
 }

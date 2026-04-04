@@ -27,6 +27,7 @@ pub fn chat(
     timeout_ms: u32,
     extra_headers: *const std.StringHashMap([]const u8),
     request: *const types.ChatRequest,
+    io: ?*std.Io,
 ) !types.Response {
     const body = try json.stringifyOpenAiRequest(allocator, request, .chat_completions, false);
     defer allocator.free(body);
@@ -37,6 +38,7 @@ pub fn chat(
         .auth = .{ .bearer = api_key },
         .timeout_ms = timeout_ms,
         .extra_headers = extra_headers,
+        .io = io,
     });
     defer response.deinit();
 
@@ -52,6 +54,7 @@ pub fn responses(
     timeout_ms: u32,
     extra_headers: *const std.StringHashMap([]const u8),
     request: *const types.ChatRequest,
+    io: ?*std.Io,
 ) !types.Response {
     const body = try json.stringifyOpenAiRequest(allocator, request, .responses, false);
     defer allocator.free(body);
@@ -62,11 +65,12 @@ pub fn responses(
         .auth = .{ .bearer = api_key },
         .timeout_ms = timeout_ms,
         .extra_headers = extra_headers,
+        .io = io,
     });
     defer response.deinit();
 
     switch (response.status) {
-        .not_found, .method_not_allowed => return chat(allocator, client, api_key, base_url, timeout_ms, extra_headers, request),
+        .not_found, .method_not_allowed => return chat(allocator, client, api_key, base_url, timeout_ms, extra_headers, request, io),
         else => try ensureSuccess(response.status),
     }
 
@@ -82,6 +86,7 @@ pub fn chatStream(
     extra_headers: *const std.StringHashMap([]const u8),
     request: *const types.ChatRequest,
     writer: anytype,
+    io: ?*std.Io,
 ) !void {
     const body = try json.stringifyOpenAiRequest(allocator, request, .chat_completions, true);
     defer allocator.free(body);
@@ -101,17 +106,14 @@ pub fn chatStream(
         .body = body,
         .auth = .{ .bearer = api_key },
         .timeout_ms = timeout_ms,
-        .accept = "text/event-stream",
         .extra_headers = extra_headers,
+        .io = io,
     }, &context, struct {
         fn onEvent(ctx: *Context, payload: []const u8) !bool {
-            var chunk = try json.parseOpenAiStreamChunk(ctx.allocator, payload);
-            defer chunk.deinit(ctx.allocator);
-
-            if (chunk.content_delta.len != 0) {
-                try ctx.writer.writeAll(chunk.content_delta);
-            }
-
+            if (std.mem.eql(u8, payload, "[DONE]")) return false;
+            const chunk = try json.parseOpenAiStreamChunk(ctx.allocator, payload);
+            defer ctx.allocator.free(chunk.content_delta);
+            try ctx.writer.writeAll(chunk.content_delta);
             return !chunk.done;
         }
     }.onEvent);

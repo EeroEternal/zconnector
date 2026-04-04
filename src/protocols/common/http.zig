@@ -2,6 +2,9 @@ const std = @import("std");
 const utils = @import("../../utils.zig");
 const types = @import("../../types.zig");
 
+// 检测当前 Zig 版本是否支持 std.Io (0.15.2+ 实验性, 0.16 标准)
+const has_std_io = @hasDecl(std, "Io");
+
 pub const Auth = union(enum) {
     bearer: []const u8,
     header: struct {
@@ -20,6 +23,7 @@ pub const RequestOptions = struct {
     accept: []const u8 = "application/json",
     max_body_bytes: usize = 16 * 1024 * 1024,
     extra_headers: ?*const std.StringHashMap([]const u8) = null,
+    io: ?*std.Io = null, // 注入 std.Io 以支持 Evented/Threaded 调度
 };
 
 pub const Response = struct {
@@ -155,11 +159,11 @@ pub fn streamSse(
         const maybe_line = try reader.takeDelimiter('\n');
         if (maybe_line == null) break;
 
-        const line = std.mem.trimRight(u8, maybe_line.?, "\r\n");
+        const line = std.mem.trimEnd(u8, maybe_line.?, "\r\n");
         if (line.len == 0) continue;
         if (!std.mem.startsWith(u8, line, "data:")) continue;
 
-        const payload = std.mem.trimLeft(u8, line[5..], " ");
+        const payload = std.mem.trimStart(u8, line[5..], " ");
         const keep_going = try on_event(context, payload);
         if (!keep_going) break;
     }

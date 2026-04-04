@@ -38,6 +38,7 @@ pub fn chat(
     timeout_ms: u32,
     extra_headers: *const std.StringHashMap([]const u8),
     request: *const types.ChatRequest,
+    io: ?*std.Io,
 ) !types.Response {
     const body = try json.stringifyAnthropicRequest(allocator, request, false);
     defer allocator.free(body);
@@ -51,6 +52,7 @@ pub fn chat(
         .auth = .{ .header = .{ .name = "x-api-key", .value = api_key } },
         .timeout_ms = timeout_ms,
         .extra_headers = &headers,
+        .io = io,
     });
     defer response.deinit();
 
@@ -67,6 +69,7 @@ pub fn chatStream(
     extra_headers: *const std.StringHashMap([]const u8),
     request: *const types.ChatRequest,
     writer: anytype,
+    io: ?*std.Io,
 ) !void {
     const body = try json.stringifyAnthropicRequest(allocator, request, true);
     defer allocator.free(body);
@@ -91,6 +94,7 @@ pub fn chatStream(
         .timeout_ms = timeout_ms,
         .accept = "text/event-stream",
         .extra_headers = &headers,
+        .io = io,
     }, &context, struct {
         fn onEvent(ctx: *Context, payload: []const u8) !bool {
             var chunk = try json.parseAnthropicStreamChunk(ctx.allocator, payload);

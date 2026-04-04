@@ -66,6 +66,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "file_upload", .path = "examples/file_upload.zig" },
         .{ .name = "multi_provider", .path = "examples/multi_provider.zig" },
         .{ .name = "tools", .path = "examples/tools.zig" },
+        .{ .name = "async_evented", .path = "examples/async_evented.zig" },
     };
 
     inline for (example_files) |example| {

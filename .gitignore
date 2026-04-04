@@ -1,3 +1,16 @@
 .zig-cache/
 zig-out/
 .DS_Store
+*.tar.xz
+*.tar.gz
+*.zip
+*.log
+.vscode/
+.env
+.python-version
+__pycache__/
+node_modules/
+*.o
+*.obj
+*.pdb
+*.exe

@@ -1,19 +1,16 @@
 const std = @import("std");
 const zconnector = @import("zconnector");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    var arg_it = std.process.Args.Iterator.init(init.minimal.args);
+    _ = arg_it.next(); // skip exe name
+    const model_name = arg_it.next() orelse "gpt-4o-mini";
 
-    const allocator = gpa.allocator();
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const api_key = init.environ_map.get("OPENAI_API_KEY") orelse return error.MissingApiKey;
+    const base_url = init.environ_map.get("OPENAI_BASE_URL") orelse "https://api.openai.com";
 
-    const api_key = std.posix.getenv("OPENAI_API_KEY") orelse return error.MissingApiKey;
-    const base_url = std.posix.getenv("OPENAI_BASE_URL") orelse "https://api.openai.com";
-    const model_name = if (args.len > 1) args[1] else "gpt-4.1-mini";
-
-    var client = try zconnector.LlmClient.openai(allocator, api_key, base_url);
+    var client = try zconnector.LlmClient.openai(allocator, api_key, base_url, init.io);
     defer client.deinit();
 
     var request = try zconnector.ChatRequest.new(allocator, model_name);
@@ -21,7 +18,11 @@ pub fn main() !void {
 
     _ = try request.addMessage(.user, "Stream a short haiku about systems programming.");
 
-    var stdout = std.fs.File.stdout().deprecatedWriter();
-    try client.chatStream(&request, stdout);
-    try stdout.writeByte('\n');
+    const stdout_file = std.Io.File.stdout();
+    var buffer: [4096]u8 = undefined;
+    var writer = stdout_file.writer(init.io, &buffer);
+
+    try client.chatStream(&request, &writer.interface, .{ .io = init.io });
+    try writer.interface.writeByte('\n');
+    try writer.flush();
 }

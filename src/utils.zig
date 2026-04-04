@@ -6,8 +6,8 @@ pub const DataUrl = struct {
 };
 
 pub fn joinUrl(allocator: std.mem.Allocator, base_url: []const u8, path: []const u8) ![]u8 {
-    const normalized_base = std.mem.trimRight(u8, base_url, "/");
-    const normalized_path = std.mem.trimLeft(u8, path, "/");
+    const normalized_base = std.mem.trimEnd(u8, base_url, "/");
+    const normalized_path = std.mem.trimStart(u8, path, "/");
 
     // If the path starts with v1 and base_url already contains a version like /v4,
     // we should prioritize the base_url's versioning if it looks like an API root.

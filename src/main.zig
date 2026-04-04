@@ -7,17 +7,20 @@ pub fn main() !void {
 
     const allocator = gpa.allocator();
     var stdout = std.fs.File.stdout().deprecatedWriter();
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
 
     const api_key = std.posix.getenv("OPENAI_API_KEY") orelse {
         try stdout.writeAll("Set OPENAI_API_KEY and optionally OPENAI_BASE_URL to run the demo.\n");
         return;
     };
     const base_url = std.posix.getenv("OPENAI_BASE_URL") orelse "https://api.openai.com";
+    const model_name = if (args.len > 1) args[1] else "gpt-4.1-mini";
 
     var client = try zconnector.LlmClient.openai(allocator, api_key, base_url);
     defer client.deinit();
 
-    var request = try zconnector.ChatRequest.new(allocator, "gpt-4.1-mini");
+    var request = try zconnector.ChatRequest.new(allocator, model_name);
     defer request.deinit();
 
     _ = try request.addMessage(.system, "You are a concise assistant.");

@@ -1,9 +1,12 @@
 const std = @import("std");
 const zconnector = @import("zconnector");
 
-pub fn main(init: std.process.Init) !void {
+pub fn main() !void {
+    const io = std.Io.get();
+    const init = try std.process.init(io);
+    defer init.deinit();
     const allocator = init.gpa;
-    const io = init.io;
+    const io = io;
 
     const api_key = init.environ_map.get("OPENAI_API_KEY") orelse {
         std.debug.print("Set OPENAI_API_KEY to run.\n", .{});

@@ -116,7 +116,9 @@ pub fn streamSse(
     options: RequestOptions,
     context: anytype,
     comptime on_event: fn (@TypeOf(context), []const u8) anyerror!bool,
+    io: *const std.Io,
 ) !void {
+    _ = io;
     const url = try utils.joinUrl(allocator, base_url, options.path);
     defer allocator.free(url);
 
@@ -143,29 +145,36 @@ pub fn streamSse(
 
     var response = try request_handle.receiveHead(&.{});
     const status_code = @intFromEnum(response.head.status);
+
     if (status_code < 200 or status_code >= 300) {
         const body_reader = response.reader(&.{});
         var error_body: std.Io.Writer.Allocating = .init(allocator);
         defer error_body.deinit();
         _ = try body_reader.streamRemaining(&error_body.writer);
-        const body = try error_body.toOwnedSlice();
-        defer allocator.free(body);
+
         return types.LlmError.ProviderSpecific;
     }
 
     var transfer_buffer: [4 * 1024]u8 = undefined;
     const reader = response.reader(&transfer_buffer);
+
     while (true) {
-        const maybe_line = try reader.takeDelimiter('\n');
-        if (maybe_line == null) break;
+        const line_chunk = reader.takeDelimiter('\n') catch break;
 
-        const line = std.mem.trimEnd(u8, maybe_line.?, "\r\n");
+        if (line_chunk == null) break;
+
+        const raw_line = line_chunk.?;
+        const line = std.mem.trim(u8, raw_line, " \r\t\n");
+
         if (line.len == 0) continue;
-        if (!std.mem.startsWith(u8, line, "data:")) continue;
 
-        const payload = std.mem.trimStart(u8, line[5..], " ");
-        const keep_going = try on_event(context, payload);
-        if (!keep_going) break;
+        if (std.mem.startsWith(u8, line, "data:")) {
+            const payload = std.mem.trimStart(u8, line[5..], " ");
+            if (std.mem.eql(u8, payload, "[DONE]")) break;
+
+            const keep_going = try on_event(context, payload);
+            if (!keep_going) break;
+        }
     }
 
     _ = options.timeout_ms;

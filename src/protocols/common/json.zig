@@ -608,8 +608,12 @@ pub fn parseOpenAiStreamChunk(allocator: std.mem.Allocator, payload: []const u8)
 
     if (objectField(parsed.value, "choices")) |choices| {
         if (firstArrayItem(choices)) |choice| {
-            if (objectField(choice, "finish_reason") != null) {
-                done = true;
+            if (objectField(choice, "finish_reason")) |fr| {
+                if (stringValue(fr)) |reason| {
+                    if (reason.len > 0) done = true;
+                } else if (fr != .null) {
+                    done = true;
+                }
             }
             if (objectField(choice, "delta")) |delta_value| {
                 if (objectField(delta_value, "content")) |content_value| {
@@ -622,6 +626,7 @@ pub fn parseOpenAiStreamChunk(allocator: std.mem.Allocator, payload: []const u8)
                                 }
                             }
                         },
+                        .null => {},
                         else => {},
                     }
                 }

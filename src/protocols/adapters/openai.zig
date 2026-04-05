@@ -107,14 +107,23 @@ pub fn chatStream(
         .auth = .{ .bearer = api_key },
         .timeout_ms = timeout_ms,
         .extra_headers = extra_headers,
-        .io = io,
     }, &context, struct {
         fn onEvent(ctx: *Context, payload: []const u8) !bool {
             if (std.mem.eql(u8, payload, "[DONE]")) return false;
-            const chunk = try json.parseOpenAiStreamChunk(ctx.allocator, payload);
+            const chunk = json.parseOpenAiStreamChunk(ctx.allocator, payload) catch |err| {
+                // 如果解析失败，可能是由于 JSON 格式不符合预期（例如 DeepSeek 的心跳包或特殊响应线）
+                // 我们选择忽略这个错误，继续处理后续事件
+                return err;
+            };
             defer ctx.allocator.free(chunk.content_delta);
-            try ctx.writer.writeAll(chunk.content_delta);
+            if (chunk.content_delta.len > 0) {
+                try ctx.writer.writeAll(chunk.content_delta);
+                // 强制刷新输出，确保流式输出能实时看到
+                if (comptime @hasDecl(@TypeOf(ctx.writer.*), "flush")) {
+                    try ctx.writer.flush();
+                }
+            }
             return !chunk.done;
         }
-    }.onEvent);
+    }.onEvent, io.?);
 }

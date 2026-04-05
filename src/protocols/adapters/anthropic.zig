@@ -94,7 +94,6 @@ pub fn chatStream(
         .timeout_ms = timeout_ms,
         .accept = "text/event-stream",
         .extra_headers = &headers,
-        .io = io,
     }, &context, struct {
         fn onEvent(ctx: *Context, payload: []const u8) !bool {
             var chunk = try json.parseAnthropicStreamChunk(ctx.allocator, payload);
@@ -106,5 +105,5 @@ pub fn chatStream(
 
             return !chunk.done;
         }
-    }.onEvent);
+    }.onEvent, io.?);
 }

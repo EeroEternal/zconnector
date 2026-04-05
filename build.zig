@@ -15,7 +15,12 @@ pub fn build(b: *std.Build) void {
     const library = b.addLibrary(.{
         .name = "zconnector",
         .linkage = .static,
-        .root_module = zconnector_module,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/zconnector.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = strip,
+        }),
     });
     b.installArtifact(library);
 

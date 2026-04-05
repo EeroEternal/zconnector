@@ -159,9 +159,11 @@ pub fn streamSse(
     const reader = response.reader(&transfer_buffer);
 
     while (true) {
-        const raw_line = try reader.readUntilDelimiterOrEofAlloc(allocator, '\n', 4096) orelse break;
-        defer allocator.free(raw_line);
+        const line_chunk = reader.takeDelimiter('\n') catch break;
 
+        if (line_chunk == null) break;
+
+        const raw_line = line_chunk.?;
         const line = std.mem.trim(u8, raw_line, " \r\t\n");
 
         if (line.len == 0) continue;

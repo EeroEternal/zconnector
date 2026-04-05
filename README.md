@@ -1,33 +1,98 @@
 # zconnector
 
-Zig LLM Connector is a lightweight, standard-library-first Zig SDK for OpenAI, Anthropic, and compatible gateways. The focus is a small public API, explicit allocation, and adapter-based protocol handling that stays close to Zig's control model.
+Zig LLM Connector (zconnector) is a lightweight, high-performance Zig SDK for OpenAI, Anthropic, and DeepSeek. Built for **Zig 0.16.0 (Nightly)**, it leverages the new **Colorless I/O** model for efficient, non-blocking streaming and network operations.
 
 ## Status
 
-This is v0.2.0 and currently targets Zig 0.15+. The code is structured for extension and includes:
+Version **0.3.0** is optimized for the latest Zig compiler. It features:
 
-- Unified chat API for OpenAI and Anthropic
-- **Full OpenAI Tooling**: Function Calling (Tools), Tool Choice, and Structured Outputs
-- OpenAI Responses API with automatic fallback to Chat Completions on 404 and 405
-- SSE streaming helpers for both providers
-- Multimodal message support for text, image URLs, and file payloads
-- Builder-based client configuration with custom headers and timeout fields
-- Example programs for chat, streaming, reasoning, file upload, tools, and multi-provider usage
+- **Colorless I/O**: Native support for Zig 0.16.0 `std.Io` and `std.http.Client`.
+- **DeepSeek & OpenAI Compatibility**: Full support for reasoning models and SSE streaming.
+- **Unified API**: One interface for Chat, Streaming, and Tool Calling across providers.
+- **Explicit Ownership**: Zero-copy where possible, explicit allocators everywhere.
 
 ## Install
 
-Add the dependency:
+Add `zconnector` to your `build.zig.zon`:
 
-```sh
+```bash
 zig fetch --save git+https://github.com/lipish/zconnector
 ```
 
-Then wire the module into your build:
+## Setup
+
+In your `build.zig`, import and wire the module:
 
 ```zig
-const dep = b.dependency("zconnector", .{
-	.target = target,
-	.optimize = optimize,
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    // 1. Resolve the dependency
+    const zconnector_dep = b.dependency("zconnector", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // 2. Add the import to your executable or library
+    const exe = b.addExecutable(.{
+        .name = "my-app",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("zconnector", zconnector_dep.module("zconnector"));
+    
+    b.installArtifact(exe);
+}
+```
+
+## Quick Start
+
+```zig
+const std = @import("std");
+const zc = @import("zconnector");
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var client = zc.LlmClient.init(allocator, .{
+        .provider = .openai,
+        .api_key = "sk-...",
+    });
+    defer client.deinit();
+
+    const response = try client.chat(.{
+        .model = "gpt-4o",
+        .messages = &.{
+            .{ .role = .user, .content = "Hello, Zig!" },
+        },
+    });
+    defer response.deinit();
+
+    std.debug.print("AI: {s}\n", .{response.content.?});
+}
+```
+
+## Examples
+
+Run any example from the repository root:
+
+```bash
+# Set your API Key
+export OPENAI_API_KEY=sk-...
+
+# Run streaming demo
+zig build streaming -- --model gpt-4o
+
+# Run reasoning demo (DeepSeek/O1)
+zig build reasoning -- --model deepseek-reasoner
+```
+
+Full list of examples available in the [examples/](examples/) directory.
+
 });
 
 exe.root_module.addImport("zconnector", dep.module("zconnector"));

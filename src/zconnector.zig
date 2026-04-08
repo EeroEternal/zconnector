@@ -6,6 +6,7 @@ const anthropic_adapter = @import("protocols/adapters/anthropic.zig");
 
 pub const Role = types.Role;
 pub const Message = types.Message;
+pub const TextMessageInit = types.TextMessageInit;
 pub const MessageContent = types.MessageContent;
 pub const ChatRequest = types.ChatRequest;
 pub const Response = types.Response;

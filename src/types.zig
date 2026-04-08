@@ -181,6 +181,11 @@ pub const Message = struct {
     }
 };
 
+pub const TextMessageInit = struct {
+    role: Role,
+    content: []const u8,
+};
+
 pub const ToolChoice = union(enum) {
     string: []const u8, // "none", "auto", "required"
     tool: Tool,
@@ -217,6 +222,21 @@ pub const ChatRequest = struct {
             .model = try allocator.dupe(u8, model),
             .messages = .empty,
         };
+    }
+
+    pub fn fromTextMessages(
+        allocator: std.mem.Allocator,
+        model: []const u8,
+        messages: []const TextMessageInit,
+    ) !ChatRequest {
+        var request = try ChatRequest.new(allocator, model);
+        errdefer request.deinit();
+
+        for (messages) |message| {
+            _ = try request.addMessage(message.role, message.content);
+        }
+
+        return request;
     }
 
     pub fn addMessage(self: *ChatRequest, role: Role, content: []const u8) !*Message {
@@ -371,4 +391,26 @@ pub fn roleName(role: Role) []const u8 {
         .assistant => "assistant",
         .tool => "tool",
     };
+}
+
+test "chat request fromTextMessages owns copied text" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var system_text = [_]u8{ 's', 'y', 's' };
+    var user_text = [_]u8{ 'u', 's', 'e', 'r' };
+
+    var request = try ChatRequest.fromTextMessages(allocator, "test-model", &.{
+        .{ .role = .system, .content = system_text[0..] },
+        .{ .role = .user, .content = user_text[0..] },
+    });
+    defer request.deinit();
+
+    system_text[0] = 'X';
+    user_text[0] = 'Y';
+
+    try std.testing.expectEqual(@as(usize, 2), request.messages.items.len);
+    try std.testing.expectEqualStrings("sys", request.messages.items[0].content.text);
+    try std.testing.expectEqualStrings("user", request.messages.items[1].content.text);
 }

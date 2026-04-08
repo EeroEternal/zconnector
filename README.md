@@ -1,108 +1,55 @@
 # zconnector
 
-Zig LLM Connector (zconnector) is a lightweight, high-performance Zig SDK for OpenAI, Anthropic, and DeepSeek. Built for **Zig 0.16.0 (Nightly)**, it leverages the new **Colorless I/O** model for efficient, non-blocking streaming and network operations.
+zconnector is a Zig LLM SDK for OpenAI-compatible APIs, Anthropic, and DeepSeek-style gateways.
 
-## Status
+## Compatibility
 
-Version **0.3.0** is optimized for the latest Zig compiler. It features:
+- Minimum Zig version: `0.15.2`
+- CI is pinned to Zig `0.15.2`
+- The current API is built around `std.Io` and explicit allocators
 
-- **Colorless I/O**: Native support for Zig 0.16.0 `std.Io` and `std.http.Client`.
-- **DeepSeek & OpenAI Compatibility**: Full support for reasoning models and SSE streaming.
-- **Unified API**: One interface for Chat, Streaming, and Tool Calling across providers.
-- **Explicit Ownership**: Zero-copy where possible, explicit allocators everywhere.
+## Features
+
+- Unified chat API for OpenAI and Anthropic providers
+- OpenAI Responses API with fallback to Chat Completions
+- SSE streaming helpers for real-time token output
+- Tool calling and structured output support
+- File and multimodal payload support
 
 ## Install
 
-Add `zconnector` to your `build.zig.zon`:
+Add the dependency from GitHub:
 
 ```bash
-zig fetch --save git+https://github.com/lipish/zconnector
+zig fetch --save git+https://github.com/EeroEternal/zconnector#v0.3.0
 ```
 
-## Setup
-
-In your `build.zig`, import and wire the module:
+Then wire it into your `build.zig`:
 
 ```zig
+const std = @import("std");
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // 1. Resolve the dependency
     const zconnector_dep = b.dependency("zconnector", .{
         .target = target,
         .optimize = optimize,
     });
 
-    // 2. Add the import to your executable or library
     const exe = b.addExecutable(.{
         .name = "my-app",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
+
     exe.root_module.addImport("zconnector", zconnector_dep.module("zconnector"));
-    
     b.installArtifact(exe);
 }
-```
-
-## Quick Start
-
-```zig
-const std = @import("std");
-const zc = @import("zconnector");
-
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    var client = zc.LlmClient.init(allocator, .{
-        .provider = .openai,
-        .api_key = "sk-...",
-    });
-    defer client.deinit();
-
-    const response = try client.chat(.{
-        .model = "gpt-4o",
-        .messages = &.{
-            .{ .role = .user, .content = "Hello, Zig!" },
-        },
-    });
-    defer response.deinit();
-
-    std.debug.print("AI: {s}\n", .{response.content.?});
-}
-```
-
-## Examples
-
-Run any example from the repository root:
-
-```bash
-# Set your API Key
-export OPENAI_API_KEY=sk-...
-
-# Run streaming demo
-zig build streaming -- --model gpt-4o
-
-# Run reasoning demo (DeepSeek/O1)
-zig build reasoning -- --model deepseek-reasoner
-```
-
-Full list of examples available in the [examples/](examples/) directory.
-
-});
-
-exe.root_module.addImport("zconnector", dep.module("zconnector"));
-```
-
-For local development in this repository:
-
-```sh
-zig build test
-zig build
 ```
 
 ## Quick Start
@@ -112,51 +59,54 @@ const std = @import("std");
 const zconnector = @import("zconnector");
 
 pub fn main() !void {
-	var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-	defer _ = gpa.deinit();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-	const allocator = gpa.allocator();
-	var stdout = std.fs.File.stdout().deprecatedWriter();
-	var client = try zconnector.LlmClient.openai(
-		allocator,
-		std.posix.getenv("OPENAI_API_KEY") orelse return error.MissingApiKey,
-		"https://api.openai.com",
-	);
-	defer client.deinit();
+    var env_map = try std.process.getEnvMap(allocator);
+    defer env_map.deinit();
 
-	var request = try zconnector.ChatRequest.new(allocator, "gpt-4.1-mini");
-	defer request.deinit();
+    const api_key = env_map.get("OPENAI_API_KEY") orelse return error.MissingApiKey;
+    const io: std.Io = .{};
 
-	_ = try request.addMessage(.system, "You are concise.");
-	_ = try request.addMessage(.user, "Explain what Zig is in two sentences.");
+    var client = try zconnector.LlmClient.openai(
+        allocator,
+        api_key,
+        "https://api.openai.com",
+        io,
+    );
+    defer client.deinit();
 
-	var response = try client.chat(&request);
-	defer response.deinit();
+    var request = try zconnector.ChatRequest.new(allocator, "gpt-4o-mini");
+    defer request.deinit();
 
-	try stdout.print("{s}\n", .{response.content});
+    _ = try request.addMessage(.user, "Give me a one-line introduction to Zig.");
+
+    var response = try client.chat(&request, .{ .io = io });
+    defer response.deinit();
+
+    var stdout = std.fs.File.stdout().deprecatedWriter();
+    try stdout.print("{s}\n", .{response.content});
 }
 ```
 
-## Public API
+## Examples
 
-```zig
-pub const LlmClient = struct {
-	pub fn builder(allocator: std.mem.Allocator) Builder;
-	pub fn openai(allocator: std.mem.Allocator, api_key: []const u8, base_url: []const u8) !LlmClient;
-	pub fn anthropic(allocator: std.mem.Allocator, api_key: []const u8, base_url: []const u8) !LlmClient;
+From the repository root:
 
-	pub fn chat(self: *LlmClient, req: *const ChatRequest) !Response;
-	pub fn chatStream(self: *LlmClient, req: *const ChatRequest, writer: anytype) !void;
-	pub fn responses(self: *LlmClient, req: *const ChatRequest) !Response;
-	pub fn deinit(self: *LlmClient) void;
-};
+```bash
+export OPENAI_API_KEY=sk-...
+zig build simple_chat
+zig build streaming -- --model deepseek-chat
+zig build reasoning
 ```
 
-## Supported Providers
+## Local Development
 
-- OpenAI-compatible endpoints via /v1/chat/completions and /v1/responses
-- Anthropic-compatible endpoints via /v1/messages
-- Custom gateways as long as they preserve one of the above wire protocols
+```bash
+zig build test
+zig build
+```
 
 ## Environment Variables
 

@@ -1,23 +1,27 @@
 const std = @import("std");
 const zconnector = @import("zconnector");
 
-pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
-    var arg_it = std.process.Args.Iterator.init(init.minimal.args);
-    _ = arg_it.next(); // skip exe name
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    var env_map = try std.process.getEnvMap(allocator);
+    defer env_map.deinit();
+    const io: std.Io = .{};
+
+    var arg_it = try std.process.argsWithAllocator(allocator);
+    defer arg_it.deinit();
+    _ = arg_it.skip();
     const file_path = arg_it.next() orelse {
-        const stdout_file = std.Io.File.stdout();
-        var buffer: [1024]u8 = undefined;
-        var writer = stdout_file.writer(init.io, &buffer);
-        try writer.interface.writeAll("usage: zig build file_upload -- <path-to-image>\n");
-        try writer.flush();
+        var stdout = std.fs.File.stdout().deprecatedWriter();
+        try stdout.writeAll("usage: zig build file_upload -- <path-to-image>\n");
         return;
     };
 
-    const api_key = init.environ_map.get("OPENAI_API_KEY") orelse return error.MissingApiKey;
-    const base_url = init.environ_map.get("OPENAI_BASE_URL") orelse "https://api.openai.com";
+    const api_key = env_map.get("OPENAI_API_KEY") orelse return error.MissingApiKey;
+    const base_url = env_map.get("OPENAI_BASE_URL") orelse "https://api.openai.com";
 
-    const bytes = try std.Io.Dir.cwd().readFileAlloc(init.io, file_path, allocator, @enumFromInt(16 * 1024 * 1024));
+    const bytes = try std.fs.cwd().readFileAlloc(allocator, file_path, 16 * 1024 * 1024);
     defer allocator.free(bytes);
 
     const encoder = std.base64.standard.Encoder;
@@ -25,7 +29,7 @@ pub fn main(init: std.process.Init) !void {
     _ = encoder.encode(encoded, bytes);
     defer allocator.free(encoded);
 
-    var client = try zconnector.LlmClient.openai(allocator, api_key, base_url, init.io);
+    var client = try zconnector.LlmClient.openai(allocator, api_key, base_url, io);
     defer client.deinit();
 
     var request = try zconnector.ChatRequest.new(allocator, "gpt-4o-mini");
@@ -33,12 +37,9 @@ pub fn main(init: std.process.Init) !void {
     _ = try request.addFile(.user, "input.png", "image/png", encoded);
     _ = try request.addMessage(.user, "Describe the uploaded image in one paragraph.");
 
-    var response = try client.chat(&request, .{ .io = init.io });
+    var response = try client.chat(&request, .{ .io = io });
     defer response.deinit();
 
-    const stdout_file = std.Io.File.stdout();
-    var buffer: [4096]u8 = undefined;
-    var writer = stdout_file.writer(init.io, &buffer);
-    try writer.interface.print("{s}\n", .{response.content});
-    try writer.flush();
+    var stdout = std.fs.File.stdout().deprecatedWriter();
+    try stdout.print("{s}\n", .{response.content});
 }

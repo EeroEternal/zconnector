@@ -1,11 +1,17 @@
 const std = @import("std");
 const zconnector = @import("zconnector");
 
-pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
-    var arg_it = std.process.Args.Iterator.init(init.minimal.args);
-    _ = arg_it.next(); // skip exe name
-    // 检查是否通过 --model 参数传入
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    var env_map = try std.process.getEnvMap(allocator);
+    defer env_map.deinit();
+    const io: std.Io = .{};
+
+    var arg_it = try std.process.argsWithAllocator(allocator);
+    defer arg_it.deinit();
+    _ = arg_it.skip();
     var model_name: []const u8 = "gpt-4o-mini";
     while (arg_it.next()) |arg| {
         if (std.mem.eql(u8, arg, "--model")) {
@@ -15,10 +21,10 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    const api_key = init.environ_map.get("OPENAI_API_KEY") orelse return error.MissingApiKey;
-    const base_url = init.environ_map.get("OPENAI_BASE_URL") orelse "https://api.openai.com";
+    const api_key = env_map.get("OPENAI_API_KEY") orelse return error.MissingApiKey;
+    const base_url = env_map.get("OPENAI_BASE_URL") orelse "https://api.openai.com";
 
-    var client = try zconnector.LlmClient.openai(allocator, api_key, base_url, init.io);
+    var client = try zconnector.LlmClient.openai(allocator, api_key, base_url, io);
     defer client.deinit();
 
     var request = try zconnector.ChatRequest.new(allocator, model_name);
@@ -26,11 +32,7 @@ pub fn main(init: std.process.Init) !void {
 
     _ = try request.addMessage(.user, "Write a short poem about the stars in the night sky, around 100 words.");
 
-    const stdout_file = std.Io.File.stdout();
-    var buffer: [4096]u8 = undefined;
-    var writer = stdout_file.writer(init.io, &buffer);
-
-    try client.chatStream(&request, &writer.interface, .{ .io = init.io });
-    try writer.interface.writeByte('\n');
-    try writer.flush();
+    var stdout = std.fs.File.stdout().deprecatedWriter();
+    try client.chatStream(&request, &stdout, .{ .io = io });
+    try stdout.writeByte('\n');
 }

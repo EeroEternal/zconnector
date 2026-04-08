@@ -2,7 +2,8 @@
     .fingerprint = 0xf0642ce7d97066e4,
     .name = .zconnector,
     .version = "0.3.0",
-    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .minimum_zig_version = "0.15.2",
     .paths = .{
         "build.zig",
         "build.zig.zon",

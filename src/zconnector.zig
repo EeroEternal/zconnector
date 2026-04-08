@@ -207,7 +207,7 @@ pub const Builder = struct {
 
         return .{
             .allocator = self.allocator,
-            .http_client = .{ .allocator = self.allocator, .io = io },
+            .http_client = .{ .allocator = self.allocator },
             .provider = self.provider,
             .io = io,
             .config = .{

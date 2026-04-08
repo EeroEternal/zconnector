@@ -1,11 +1,15 @@
 const std = @import("std");
 const zconnector = @import("zconnector");
 
-pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
-    const io = init.io;
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    var env_map = try std.process.getEnvMap(allocator);
+    defer env_map.deinit();
+    const io: std.Io = .{};
 
-    const api_key = init.environ_map.get("OPENAI_API_KEY") orelse {
+    const api_key = env_map.get("OPENAI_API_KEY") orelse {
         std.debug.print("Set OPENAI_API_KEY to run.\n", .{});
         return;
     };
@@ -24,12 +28,9 @@ pub fn main(init: std.process.Init) !void {
     defer request.deinit();
     _ = try request.addMessage(.user, "Hello! Tell me a very short joke.");
 
-    const stdout = std.Io.File.stdout();
-    var buffer: [4096]u8 = undefined;
-    var writer = stdout.writer(io, &buffer);
+    var stdout = std.fs.File.stdout().deprecatedWriter();
 
-    try writer.interface.print("Sending async request (Evented mode)...\n", .{});
-    try writer.flush();
+    try stdout.print("Sending async request (Evented mode)...\n", .{});
 
     // 2. 执行请求
     // 在 Evented 模式下，这个调用会在底层由 io_uring/GCD 调度
@@ -37,6 +38,5 @@ pub fn main(init: std.process.Init) !void {
     var response = try client.chat(&request, .{ .io = io });
     defer response.deinit();
 
-    try writer.interface.print("Response: {s}\n", .{response.content});
-    try writer.flush();
+    try stdout.print("Response: {s}\n", .{response.content});
 }

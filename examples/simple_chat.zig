@@ -1,12 +1,18 @@
 const std = @import("std");
 const zconnector = @import("zconnector");
 
-pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
-    const api_key = init.environ_map.get("OPENAI_API_KEY") orelse return error.MissingApiKey;
-    const base_url = init.environ_map.get("OPENAI_BASE_URL") orelse "https://api.openai.com";
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    var env_map = try std.process.getEnvMap(allocator);
+    defer env_map.deinit();
+    const io: std.Io = .{};
 
-    var client = try zconnector.LlmClient.openai(allocator, api_key, base_url, init.io);
+    const api_key = env_map.get("OPENAI_API_KEY") orelse return error.MissingApiKey;
+    const base_url = env_map.get("OPENAI_BASE_URL") orelse "https://api.openai.com";
+
+    var client = try zconnector.LlmClient.openai(allocator, api_key, base_url, io);
     defer client.deinit();
 
     var request = try zconnector.ChatRequest.new(allocator, "gpt-4o-mini");
@@ -14,13 +20,9 @@ pub fn main(init: std.process.Init) !void {
 
     _ = try request.addMessage(.user, "Give me a one-line introduction to Zig.");
 
-    var response = try client.chat(&request, .{ .io = init.io });
+    var response = try client.chat(&request, .{ .io = io });
     defer response.deinit();
 
-    const stdout = std.Io.File.stdout();
-    var buffer: [4096]u8 = undefined;
-    var writer = stdout.writer(init.io, &buffer);
-
-    try writer.interface.print("{s}\n", .{response.content});
-    try writer.flush();
+    var stdout = std.fs.File.stdout().deprecatedWriter();
+    try stdout.print("{s}\n", .{response.content});
 }

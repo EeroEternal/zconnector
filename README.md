@@ -21,7 +21,7 @@ zconnector is a Zig LLM SDK for OpenAI-compatible APIs, Anthropic, and DeepSeek-
 Add the dependency from GitHub:
 
 ```bash
-zig fetch --save git+https://github.com/EeroEternal/zconnector#v0.3.1
+zig fetch --save git+https://github.com/EeroEternal/zconnector#v0.3.2
 ```
 
 Then wire it into your `build.zig`:
